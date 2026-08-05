@@ -15,6 +15,9 @@ public interface BookingRepository
 
     List<Booking> findByTourist_TouristId(Integer touristId);
 
+    // ✅ NEW - newest bookings first (used by getMyBookingsDetailed)
+    List<Booking> findByTourist_TouristIdOrderByBookingDateDesc(Integer touristId);
+
     List<Booking> findByBookingType(String bookingType);
 
     List<Booking> findByStatus(String status);

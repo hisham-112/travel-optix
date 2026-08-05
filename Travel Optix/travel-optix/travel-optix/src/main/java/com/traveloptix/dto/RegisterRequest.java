@@ -10,8 +10,7 @@ import lombok.Data;
 public class RegisterRequest {
 
     @NotBlank(message = "Full name is required")
-    @Size(max = 100, 
-          message = "Full name cannot exceed 100 characters")
+    @Size(max = 100, message = "Full name cannot exceed 100 characters")
     private String fullName;
 
     @NotBlank(message = "Email is required")
@@ -22,19 +21,35 @@ public class RegisterRequest {
     private String phone;
 
     @NotBlank(message = "Password is required")
-    @Size(min = 6, 
-          message = "Password must be at least 6 characters")
+    @Size(min = 6, message = "Password must be at least 6 characters")
     private String password;
 
     @NotBlank(message = "Role is required")
-    @Pattern(regexp = "TOURIST|TOUR_GUIDE|HOST_FAMILY|ADMIN",
-             message = "Role must be TOURIST, TOUR_GUIDE, HOST_FAMILY or ADMIN")
+    @Pattern(
+        regexp = "TOURIST|TOUR_GUIDE|HOST_FAMILY|ADMIN",
+        message = "Role must be TOURIST, TOUR_GUIDE, HOST_FAMILY or ADMIN"
+    )
     private String role;
+
+    // ✅ NEW - Ghana Card (validated format GHA-XXXXXXXXX-X)
+    @Pattern(
+        regexp = "GHA-\\d{9}-\\d",
+        message = "Ghana Card must be in the format GHA-123456789-0"
+    )
+    private String ghanaCardNumber;
+
+    // ✅ NEW - OTP from email verification step
+    private String otp;
+
+    // ✅ NEW - Location fields
+    private String address;
+    private String city;
 
     // Tourist specific fields
     private String nationality;
     private String passportNumber;
     private String dateOfBirth;
+    private String region;
 
     // Tour Guide specific fields
     private String languages;
@@ -45,8 +60,6 @@ public class RegisterRequest {
 
     // Host Family specific fields
     private String familyName;
-    private String address;
-    private String region;
     private Integer maxGuests;
     private String description;
 }

@@ -14,4 +14,6 @@ public interface AttractionRepository
     List<Attraction> findByRegion(String region);
 
     List<Attraction> findByCategory(String category);
+
+     boolean existsByNameIgnoreCase(String name);
 }

@@ -50,6 +50,20 @@ public class User implements UserDetails {
     @Column(name = "is_active")
     private Boolean isActive = true;
 
+    // ✅ NEW - Ghana Card number for identity verification
+    @Column(name = "ghana_card_number", unique = true, length = 20)
+    private String ghanaCardNumber;
+
+    // ✅ NEW - Location details
+    @Column(name = "address", length = 255)
+    private String address;
+
+    @Column(name = "city", length = 100)
+    private String city;
+
+    @Column(name = "region", length = 100)
+    private String region;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 

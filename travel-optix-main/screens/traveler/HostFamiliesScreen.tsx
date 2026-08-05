@@ -31,7 +31,7 @@ export default function HostFamiliesScreen() {
   const loadFamilies = useCallback(async () => {
     try {
       const res = await api.get("/families");
-      setFamilies(res.data.data || []);
+      setFamilies(res.data?.data || []);
     } catch (error) {
       Alert.alert("Error", "Could not load host families.");
     } finally {
@@ -46,7 +46,10 @@ export default function HostFamiliesScreen() {
 
   const handleSelect = (family: HostFamily) => {
     if (family.verificationStatus !== "APPROVED") {
-      Alert.alert("Not Available", "This host family is still under verification.");
+      Alert.alert(
+        "Not Available",
+        "This host family is still under verification."
+      );
       return;
     }
     navigation.navigate("HostFamilyBooking", { family });
@@ -63,24 +66,49 @@ export default function HostFamiliesScreen() {
   return (
     <ScrollView
       style={styles.container}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadFamilies} tintColor="#2563EB" />}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={loadFamilies}
+          tintColor="#2563EB"
+        />
+      }
     >
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Host Families</Text>
-        <Text style={styles.headerSubtitle}>Stay with a local Ghanaian family</Text>
+        <Text style={styles.headerSubtitle}>
+          Stay with a local Ghanaian family
+        </Text>
       </View>
 
       <View style={styles.list}>
-        {families.map((family) => (
-          <TouchableOpacity key={family.familyId} style={styles.card} onPress={() => handleSelect(family)}>
-            <Text style={styles.familyName}>{family.familyName}</Text>
-            <Text style={styles.location}>{family.location}</Text>
-            <Text style={styles.price}>
-              {family.pricePerNight ? `GHS ${family.pricePerNight} per night` : "Price on request"}
+        {families.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>No host families available</Text>
+            <Text style={styles.emptySubtitle}>
+              Check back later for available families
             </Text>
-            <Text style={styles.capacity}>Maximum {family.maxCapacity} people</Text>
-          </TouchableOpacity>
-        ))}
+          </View>
+        ) : (
+          families.map((family) => (
+            <TouchableOpacity
+              key={family.familyId}
+              style={styles.card}
+              onPress={() => handleSelect(family)}
+            >
+              <Text style={styles.familyName}>{family.familyName}</Text>
+              <Text style={styles.location}>{family.location}</Text>
+              <Text style={styles.price}>
+                {family.pricePerNight
+                  ? `GHS ${Number(family.pricePerNight).toFixed(2)} / night`
+                  : "Price on request"}
+              </Text>
+              <Text style={styles.capacity}>
+                Max {family.maxCapacity} {family.maxCapacity === 1 ? "person" : "people"}
+              </Text>
+            </TouchableOpacity>
+          ))
+        )}
       </View>
     </ScrollView>
   );
@@ -97,7 +125,6 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 24, fontWeight: "bold", color: "#FFFFFF" },
   headerSubtitle: { fontSize: 14, color: "#94A3B8", marginTop: 4 },
-
   list: { padding: 16 },
   card: {
     backgroundColor: "#FFFFFF",
@@ -110,7 +137,25 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   familyName: { fontSize: 18, fontWeight: "700", color: "#111827" },
-  location: { fontSize: 14, color: "#2563EB", marginVertical: 4 },
-  price: { fontSize: 16, fontWeight: "700", color: "#16A34A", marginTop: 4 },
-  capacity: { fontSize: 13, color: "#6B7280" },
+  location: { fontSize: 14, color: "#2563EB", marginTop: 4 },
+  price: { fontSize: 16, fontWeight: "700", color: "#16A34A", marginTop: 8 },
+  capacity: { fontSize: 13, color: "#6B7280", marginTop: 4 },
+  emptyState: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    padding: 32,
+    alignItems: "center",
+    marginTop: 20,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+    marginBottom: 4,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: "#6B7280",
+    textAlign: "center",
+  },
 });

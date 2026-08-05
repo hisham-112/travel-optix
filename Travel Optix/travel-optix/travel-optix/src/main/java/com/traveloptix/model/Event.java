@@ -25,11 +25,11 @@ public class Event {
     @JoinColumn(name = "family_id")
     private HostFamily family;
 
-    @Column(name = "name", 
+    @Column(name = "name",
             nullable = false, length = 200)
     private String name;
 
-    @Column(name = "description", 
+    @Column(name = "description",
             columnDefinition = "TEXT")
     private String description;
 
@@ -38,6 +38,10 @@ public class Event {
 
     @Column(name = "location", length = 255)
     private String location;
+
+    // ✅ NEW - for the region badge + search in the app
+    @Column(name = "region", length = 100)
+    private String region;
 
     @Column(name = "event_date", nullable = false)
     private LocalDate eventDate;
@@ -54,6 +58,14 @@ public class Event {
     @Column(name = "price_per_person",
             precision = 10, scale = 2)
     private BigDecimal pricePerPerson;
+
+    // ✅ NEW - main photo for the image carousel
+    @Column(name = "photo_url", length = 500)
+    private String photoUrl;
+
+    // ✅ NEW - comma-separated extra photos for slides
+    @Column(name = "photo_urls", columnDefinition = "TEXT")
+    private String photoUrls;
 
     @Column(name = "is_active")
     private Boolean isActive = true;

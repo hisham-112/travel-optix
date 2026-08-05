@@ -49,17 +49,22 @@ public class AuthService {
     public String register(RegisterRequest request) {
 
         // Check if email already exists
-        if (userRepository.existsByEmail(
-                request.getEmail())) {
-            throw new RuntimeException(
-                "Email already registered");
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new RuntimeException("Email already registered");
         }
 
         // Check if phone already exists
-        if (userRepository.existsByPhone(
-                request.getPhone())) {
+        if (userRepository.existsByPhone(request.getPhone())) {
+            throw new RuntimeException("Phone number already registered");
+        }
+
+        // ✅ Check if Ghana Card already registered
+        if (request.getGhanaCardNumber() != null
+                && !request.getGhanaCardNumber().isBlank()
+                && userRepository.existsByGhanaCardNumber(
+                        request.getGhanaCardNumber())) {
             throw new RuntimeException(
-                "Phone number already registered");
+                    "This Ghana Card is already registered to an account");
         }
 
         // Create base User
@@ -68,10 +73,16 @@ public class AuthService {
         user.setEmail(request.getEmail());
         user.setPhone(request.getPhone());
         user.setPasswordHash(
-            passwordEncoder.encode(request.getPassword()));
+                passwordEncoder.encode(request.getPassword()));
         user.setRole(request.getRole());
-        user.setIsVerified(false);
+        user.setIsVerified(true); // ✅ verified via OTP
         user.setIsActive(true);
+
+        // ✅ Save new fields to User
+        user.setGhanaCardNumber(request.getGhanaCardNumber());
+        user.setAddress(request.getAddress());
+        user.setCity(request.getCity());
+        user.setRegion(request.getRegion());
 
         User savedUser = userRepository.save(user);
 
@@ -81,25 +92,23 @@ public class AuthService {
             case "TOURIST" -> {
                 Tourist tourist = new Tourist();
                 tourist.setUser(savedUser);
-                tourist.setNationality(
-                    request.getNationality());
-                tourist.setPassportNumber(
-                    request.getPassportNumber());
+                tourist.setNationality(request.getNationality());
+                tourist.setPassportNumber(request.getPassportNumber());
 
                 // Generate unique travel pass code
                 tourist.setTravelPassCode(
-                    "TOPT-" + 
-                    LocalDate.now().getYear() + 
-                    "-" + 
-                    UUID.randomUUID()
-                        .toString()
-                        .substring(0, 5)
-                        .toUpperCase());
+                        "TOPT-" +
+                        LocalDate.now().getYear() +
+                        "-" +
+                        UUID.randomUUID()
+                                .toString()
+                                .substring(0, 5)
+                                .toUpperCase());
 
-                if (request.getDateOfBirth() != null) {
+                if (request.getDateOfBirth() != null
+                        && !request.getDateOfBirth().isBlank()) {
                     tourist.setDateOfBirth(
-                        LocalDate.parse(
-                            request.getDateOfBirth()));
+                            LocalDate.parse(request.getDateOfBirth()));
                 }
 
                 touristRepository.save(tourist);
@@ -109,17 +118,15 @@ public class AuthService {
                 TourGuide guide = new TourGuide();
                 guide.setUser(savedUser);
                 guide.setLanguages(request.getLanguages());
-                guide.setExpertiseAreas(
-                    request.getExpertiseAreas());
+                guide.setExpertiseAreas(request.getExpertiseAreas());
                 guide.setYearsExperience(
-                    request.getYearsExperience() != null 
-                    ? request.getYearsExperience() : 0);
+                        request.getYearsExperience() != null
+                                ? request.getYearsExperience() : 0);
                 guide.setBio(request.getBio());
 
                 if (request.getHourlyRate() != null) {
                     guide.setHourlyRate(
-                        BigDecimal.valueOf(
-                            request.getHourlyRate()));
+                            BigDecimal.valueOf(request.getHourlyRate()));
                 }
 
                 guide.setVerificationStatus("PENDING");
@@ -133,17 +140,15 @@ public class AuthService {
                 family.setAddress(request.getAddress());
                 family.setRegion(request.getRegion());
                 family.setMaxGuests(
-                    request.getMaxGuests() != null 
-                    ? request.getMaxGuests() : 1);
-                family.setDescription(
-                    request.getDescription());
+                        request.getMaxGuests() != null
+                                ? request.getMaxGuests() : 1);
+                family.setDescription(request.getDescription());
                 family.setVerificationStatus("PENDING");
                 hostFamilyRepository.save(family);
             }
         }
 
-        return "Registration successful! " +
-               "Welcome to Travel Optix.";
+        return "Registration successful! Welcome to Travel Optix.";
     }
 
     // ==========================================
@@ -155,21 +160,19 @@ public class AuthService {
         User user = userRepository
                 .findByEmail(request.getEmail())
                 .orElseThrow(() -> new RuntimeException(
-                    "Invalid email or password"));
+                        "Invalid email or password"));
 
         // Check if account is active
         if (!user.getIsActive()) {
             throw new RuntimeException(
-                "Account is deactivated. " +
-                "Please contact support.");
+                    "Account is deactivated. Please contact support.");
         }
 
         // Verify password
         if (!passwordEncoder.matches(
                 request.getPassword(),
                 user.getPasswordHash())) {
-            throw new RuntimeException(
-                "Invalid email or password");
+            throw new RuntimeException("Invalid email or password");
         }
 
         // Generate JWT token
@@ -185,5 +188,12 @@ public class AuthService {
                 user.getEmail(),
                 user.getRole(),
                 user.getIsVerified());
+    }
+
+    // ==========================================
+    // CHECK IF EMAIL EXISTS
+    // ==========================================
+    public boolean emailExists(String email) {
+        return userRepository.findByEmail(email).isPresent();
     }
 }

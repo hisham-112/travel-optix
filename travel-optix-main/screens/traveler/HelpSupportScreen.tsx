@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import { useState } from "react";
 import { useNavigation } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons";
 
 const FAQS = [
   {
@@ -77,12 +78,12 @@ export default function HelpSupportScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.contactCard} onPress={handleCall}>
-            <Text style={styles.contactIcon}>📞</Text>
+            <Ionicons name="call" size={24} color="#2563EB" />
             <Text style={styles.contactLabel}>Call</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.contactCard} onPress={handleWhatsApp}>
-            <Text style={styles.contactIcon}>💬</Text>
+            <Ionicons name="logo-whatsapp" size={24} color="#25D366" />
             <Text style={styles.contactLabel}>WhatsApp</Text>
           </TouchableOpacity>
         </View>
@@ -135,7 +136,13 @@ const styles = StyleSheet.create({
 
   content: { flex: 1, padding: 20 },
 
-  sectionTitle: { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 12, marginTop: 8 },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 12,
+    marginTop: 8,
+  },
 
   contactRow: { flexDirection: "row", gap: 10, marginBottom: 24 },
   contactCard: {
@@ -144,12 +151,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
     shadowColor: "#000",
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
   },
-  contactIcon: { fontSize: 24, marginBottom: 6 },
+  contactIcon: { fontSize: 24 },
   contactLabel: { fontSize: 13, fontWeight: "600", color: "#374151" },
 
   faqCard: {
@@ -167,9 +176,20 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  faqQuestion: { fontSize: 14, fontWeight: "600", color: "#111827", flex: 1, marginRight: 10 },
+  faqQuestion: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#111827",
+    flex: 1,
+    marginRight: 10,
+  },
   faqChevron: { fontSize: 20, color: "#2563EB", fontWeight: "700" },
-  faqAnswer: { fontSize: 13, color: "#6B7280", marginTop: 10, lineHeight: 19 },
+  faqAnswer: {
+    fontSize: 13,
+    color: "#6B7280",
+    marginTop: 10,
+    lineHeight: 19,
+  },
 
   bottomSpace: { height: 40 },
 });

@@ -51,12 +51,6 @@ const quickActions = [
     image:
       "https://images.unsplash.com/photo-1588390801685-1432b35a975b?w=600&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8OHx8dG91ciUyMGd1aWRlfGVufDB8fDB8fHww",
   },
-  {
-    id: "5",
-    label: "Family Trips",
-    image:
-      "https://images.unsplash.com/photo-1711500310961-6f2e5c12d8a6?w=600&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MjB8fGdoYW5haWFuJTIwZmFtaWx5fGVufDB8fDB8fHww",
-  },
 ];
 
 function getInitials(name: string) {
@@ -150,9 +144,8 @@ export default function HomeScreen() {
     fetchBookings();
   };
 
-  // ✅ ONLY CHANGE: Transport now opens the real screen
   const handleQuickAction = (label: string) => {
-    if (label === "Events" || label === "Family Trips") {
+    if (label === "Events") {
       navigation.navigate("Events");
       return;
     }
@@ -298,29 +291,101 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F9FAFB" },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 24, paddingTop: 60, backgroundColor: "#FFFFFF" },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 24,
+    paddingTop: 60,
+    backgroundColor: "#FFFFFF",
+  },
   greeting: { fontSize: 14, color: "#6B7280" },
   name: { fontSize: 20, fontWeight: "bold", color: "#111827" },
-  avatar: { backgroundColor: "#2563EB", width: 44, height: 44, borderRadius: 22, justifyContent: "center", alignItems: "center" },
+  avatar: {
+    backgroundColor: "#2563EB",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   avatarText: { color: "#FFFFFF", fontWeight: "bold", fontSize: 16 },
-  passCard: { margin: 24, marginBottom: 20, backgroundColor: "#1E3A5F", borderRadius: 16, padding: 24 },
-  passLabel: { color: "#94A3B8", fontSize: 14, marginBottom: 8 },
+  passCard: {
+    margin: 24,
+    marginBottom: 20,
+    backgroundColor: "#2563EB",
+    borderRadius: 16,
+    padding: 24,
+  },
+  passLabel: { color: "#DBEAFE", fontSize: 14, marginBottom: 8 },
   passId: { color: "#FFFFFF", fontSize: 18, fontWeight: "bold", marginBottom: 8 },
   passStatus: { color: "#4ADE80", fontSize: 14, fontWeight: "600" },
-  passHint: { color: "#CBD5E1", fontSize: 12, marginTop: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: "bold", color: "#111827", paddingHorizontal: 24, marginBottom: 12 },
+  passHint: { color: "#DBEAFE", fontSize: 12, marginTop: 12 },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#111827",
+    paddingHorizontal: 24,
+    marginBottom: 12,
+  },
   sectionTitleNoPadding: { fontSize: 18, fontWeight: "bold", color: "#111827" },
-  actionsGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 16, marginBottom: 24 },
-  actionCard: { borderRadius: 12, width: "45%", margin: "2.5%", height: 120, overflow: "hidden" },
+  actionsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: 16,
+    marginBottom: 24,
+  },
+  actionCard: {
+    borderRadius: 12,
+    width: "45%",
+    margin: "2.5%",
+    height: 120,
+    overflow: "hidden",
+  },
   actionImage: { width: "100%", height: "100%" },
-  actionOverlay: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.45)", paddingVertical: 8, paddingHorizontal: 10 },
+  actionOverlay: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
   actionLabel: { fontSize: 14, fontWeight: "700", color: "#FFFFFF" },
-  bookingsHeading: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 24, marginBottom: 12 },
+  bookingsHeading: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    marginBottom: 12,
+  },
   viewAll: { color: "#2563EB", fontSize: 14, fontWeight: "600" },
   loadingIndicator: { marginTop: 20 },
-  bookingCard: { backgroundColor: "#FFFFFF", borderRadius: 12, marginHorizontal: 24, marginBottom: 12, padding: 16, shadowColor: "#000000", shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  bookingTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 5 },
-  bookingTitle: { fontSize: 16, fontWeight: "600", color: "#111827", flex: 1, marginRight: 12 },
+  bookingCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    marginHorizontal: 24,
+    marginBottom: 12,
+    padding: 16,
+    shadowColor: "#000000",
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  bookingTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 5,
+  },
+  bookingTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+    flex: 1,
+    marginRight: 12,
+  },
   bookingDate: { fontSize: 13, color: "#6B7280", marginBottom: 4 },
   bookingStatus: { fontSize: 12, fontWeight: "700" },
   bookingNotes: { fontSize: 12, color: "#9CA3AF", marginTop: 4 },

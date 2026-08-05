@@ -1,9 +1,14 @@
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
-  ActivityIndicator, Alert, RefreshControl,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  ActivityIndicator, Alert, RefreshControl, Modal,
 } from "react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
+import { WebView } from "react-native-webview";
 import api from "../../services/api";
+
+// ⚠️ Must match paystack.callback-url in application.properties
+const PAYSTACK_CALLBACK_PREFIX = "https://traveloptix.app/paystack/callback";
 
 type Booking = {
   bookingId: number;
@@ -12,6 +17,7 @@ type Booking = {
   status?: string;
   totalAmount?: number | string | null;
   notes?: string;
+  referenceName?: string;
 };
 
 function formatBookingType(type?: string) {
@@ -33,26 +39,28 @@ function formatDate(dateValue?: string) {
 }
 
 export default function PaymentsScreen({ route }: any) {
-  // ✅ Get selected booking from navigation if passed
   const selectedFromBooking = route?.params?.selectedBooking as Booking | undefined;
 
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(selectedFromBooking || null);
-  const [paymentMethod, setPaymentMethod] = useState<"MOBILE_MONEY" | "CARD">("MOBILE_MONEY");
-  const [mobileNumber, setMobileNumber] = useState("");
-  const [mobileProvider, setMobileProvider] = useState("MTN");
-  const [cardHolderName, setCardHolderName] = useState("");
-  const [cardNumber, setCardNumber] = useState("");
-  const [cardExpiry, setCardExpiry] = useState("");
-  const [cardCvv, setCardCvv] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [processing, setProcessing] = useState(false);
 
+  // ✅ Paystack checkout state
+  const [payUrl, setPayUrl] = useState<string | null>(null);
+  const [payReference, setPayReference] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+
+  // ✅ FIXED: only SUCCESS payments remove a booking from "awaiting payment"
   const paidBookingIds = useMemo(() => {
     return new Set(
-      payments.map((p) => p.booking?.bookingId).filter((id): id is number => typeof id === "number")
+      payments
+        .filter((p) => (p.paymentStatus || "").toUpperCase() === "SUCCESS")
+        .map((p) => p.booking?.bookingId)
+        .filter((id): id is number => typeof id === "number")
     );
   }, [payments]);
 
@@ -60,8 +68,7 @@ export default function PaymentsScreen({ route }: any) {
     return bookings.filter((booking) => {
       const isCancelled = (booking.status || "").toUpperCase() === "CANCELLED";
       const amountNum = booking.totalAmount != null ? parseFloat(String(booking.totalAmount)) : 0;
-      const hasAmount = amountNum > 0;
-      return !isCancelled && hasAmount && !paidBookingIds.has(booking.bookingId);
+      return !isCancelled && amountNum > 0 && !paidBookingIds.has(booking.bookingId);
     });
   }, [bookings, paidBookingIds]);
 
@@ -87,44 +94,82 @@ export default function PaymentsScreen({ route }: any) {
   }, [loadPaymentData]);
 
   const handleRefresh = () => { setRefreshing(true); loadPaymentData(); };
-  const selectBooking = (booking: Booking) => setSelectedBooking(booking);
-  const clearPaymentForm = () => {
-    setMobileNumber(""); setMobileProvider("MTN"); setCardHolderName("");
-    setCardNumber(""); setCardExpiry(""); setCardCvv("");
-  };
 
-  const handlePayment = async () => {
+  // ─── 1. Start payment: get Paystack checkout URL ─────────
+  const startPayment = async () => {
     if (!selectedBooking) {
       Alert.alert("Select a booking", "Please choose a booking to pay for.");
       return;
     }
-    const message = paymentMethod === "MOBILE_MONEY"
-      ? `Pay ${formatMoney(selectedBooking.totalAmount)} using ${mobileProvider} Mobile Money?`
-      : `Pay ${formatMoney(selectedBooking.totalAmount)} using card?`;
-    Alert.alert("Confirm Payment", message, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Pay Now", onPress: processPayment }
-    ]);
-  };
 
-  const processPayment = async () => {
-    if (!selectedBooking) return;
     setProcessing(true);
     try {
-      const endpoint = paymentMethod === "MOBILE_MONEY" ? "/tourist/payments/mobile-money" : "/tourist/payments/card";
-      const body = paymentMethod === "MOBILE_MONEY"
-        ? { bookingId: selectedBooking.bookingId, paymentMethod: "MOBILE_MONEY", mobileNumber: mobileNumber.trim(), mobileProvider, currency: "GHS" }
-        : { bookingId: selectedBooking.bookingId, paymentMethod: "CARD", cardHolderName: cardHolderName.trim(), cardNumber: cardNumber.replace(/\s/g, ""), cardExpiry: cardExpiry.trim(), cardCvv: cardCvv.trim(), currency: "GHS" };
-      const response = await api.post(endpoint, body);
-      Alert.alert("Payment Successful", response.data?.message || "Payment was successful.");
-      setSelectedBooking(null);
-      clearPaymentForm();
-      await loadPaymentData();
+      const res = await api.post("/tourist/payments/paystack/initialize", {
+        bookingId: selectedBooking.bookingId,
+      });
+
+      const data = res.data?.data || {};
+      if (!data.authorizationUrl) {
+        throw new Error("No checkout URL returned");
+      }
+
+      setPayReference(data.reference);
+      setPayUrl(data.authorizationUrl); // opens the WebView modal
     } catch (error: any) {
-      const msg = error.response?.data?.message || "Could not process payment.";
-      Alert.alert("Payment Failed", msg);
+      Alert.alert(
+        "Could not start payment",
+        error.response?.data?.message || error.message || "Please try again."
+      );
     } finally {
       setProcessing(false);
+    }
+  };
+
+  // ─── 2. Watch the WebView for Paystack's redirect ────────
+  const handleWebViewNav = (navState: { url?: string }) => {
+    if (navState.url && navState.url.startsWith(PAYSTACK_CALLBACK_PREFIX)) {
+      setPayUrl(null);
+      verifyPayment();
+    }
+  };
+
+  // ─── 3. Verify with the backend ──────────────────────────
+  const verifyPayment = async (reference?: string | null) => {
+    const ref = reference ?? payReference;
+    if (!ref) return;
+
+    setVerifying(true);
+    try {
+      const res = await api.get(`/tourist/payments/paystack/verify/${ref}`);
+      const status =
+        res.data?.data?.paymentStatus || res.data?.paymentStatus || "";
+
+      if (status.toUpperCase() === "SUCCESS") {
+        Alert.alert("Payment Successful 🎉", "Your booking is now confirmed.");
+        setSelectedBooking(null);
+      } else {
+        Alert.alert(
+          "Payment not completed",
+          "No successful payment was found for this transaction."
+        );
+      }
+      await loadPaymentData();
+    } catch (error: any) {
+      Alert.alert(
+        "Verification failed",
+        error.response?.data?.message || "Could not verify payment."
+      );
+    } finally {
+      setVerifying(false);
+      setPayReference(null);
+    }
+  };
+
+  // Closing the checkout early → silently check just in case they paid
+  const closeCheckout = () => {
+    setPayUrl(null);
+    if (payReference) {
+      verifyPayment(payReference);
     }
   };
 
@@ -147,7 +192,6 @@ export default function PaymentsScreen({ route }: any) {
 
       <Text style={styles.sectionTitle}>Bookings Awaiting Payment</Text>
 
-      {/* ✅ Filter out bookings with 0 or null price properly */}
       {unpaidBookings.length === 0 ? (
         <View style={styles.emptyCard}>
           <Text style={styles.emptyTitle}>No unpaid bookings</Text>
@@ -157,9 +201,11 @@ export default function PaymentsScreen({ route }: any) {
         unpaidBookings.map((booking) => {
           const isSelected = selectedBooking?.bookingId === booking.bookingId;
           return (
-            <TouchableOpacity key={booking.bookingId} style={[styles.bookingCard, isSelected && styles.selectedBookingCard]} onPress={() => selectBooking(booking)}>
+            <TouchableOpacity key={booking.bookingId} style={[styles.bookingCard, isSelected && styles.selectedBookingCard]} onPress={() => setSelectedBooking(booking)}>
               <View style={styles.bookingRow}>
-                <Text style={styles.bookingTitle}>{formatBookingType(booking.bookingType)} Booking</Text>
+                <Text style={styles.bookingTitle}>
+                  {booking.referenceName || `${formatBookingType(booking.bookingType)} Booking`}
+                </Text>
                 {isSelected && <Text style={styles.selectedText}>SELECTED</Text>}
               </View>
               <Text style={styles.info}>Scheduled: {formatDate(booking.scheduledDate)}</Text>
@@ -171,55 +217,28 @@ export default function PaymentsScreen({ route }: any) {
 
       {selectedBooking && (
         <>
-          <Text style={styles.sectionTitle}>Payment Method</Text>
-          <View style={styles.methodRow}>
-            <TouchableOpacity style={[styles.methodButton, paymentMethod === "MOBILE_MONEY" && styles.selectedMethod]} onPress={() => setPaymentMethod("MOBILE_MONEY")}>
-              <Text style={[styles.methodText, paymentMethod === "MOBILE_MONEY" && styles.selectedMethodText]}>Mobile Money</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.methodButton, paymentMethod === "CARD" && styles.selectedMethod]} onPress={() => setPaymentMethod("CARD")}>
-              <Text style={[styles.methodText, paymentMethod === "CARD" && styles.selectedMethodText]}>Card</Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={styles.sectionTitle}>Checkout</Text>
 
           <View style={styles.paymentCard}>
-            <Text style={styles.payFor}>Paying: <Text style={styles.bold}>{formatBookingType(selectedBooking.bookingType)} Booking</Text></Text>
+            <Text style={styles.payFor}>
+              Paying: <Text style={styles.bold}>{selectedBooking.referenceName || `${formatBookingType(selectedBooking.bookingType)} Booking`}</Text>
+            </Text>
             <Text style={styles.bigAmount}>{formatMoney(selectedBooking.totalAmount)}</Text>
 
-            {paymentMethod === "MOBILE_MONEY" ? (
-              <>
-                <Text style={styles.label}>Provider</Text>
-                <View style={styles.providerRow}>
-                  {["MTN", "Vodafone", "AirtelTigo"].map((p) => (
-                    <TouchableOpacity key={p} style={[styles.providerButton, mobileProvider === p && styles.selectedProvider]} onPress={() => setMobileProvider(p)}>
-                      <Text style={[styles.providerText, mobileProvider === p && styles.selectedProviderText]}>{p}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <Text style={styles.label}>Mobile Number</Text>
-                <TextInput style={styles.input} placeholder="0240000000" keyboardType="phone-pad" value={mobileNumber} onChangeText={setMobileNumber} />
-              </>
-            ) : (
-              <>
-                <Text style={styles.demoWarning}>Demo only — do not use real card.</Text>
-                <Text style={styles.label}>Card Name</Text>
-                <TextInput style={styles.input} placeholder="Demo User" autoCapitalize="words" value={cardHolderName} onChangeText={setCardHolderName} />
-                <Text style={styles.label}>Card Number</Text>
-                <TextInput style={styles.input} placeholder="4111..." keyboardType="number-pad" value={cardNumber} onChangeText={setCardNumber} />
-                <View style={styles.row}>
-                  <View style={styles.half}>
-                    <Text style={styles.label}>Expiry</Text>
-                    <TextInput style={styles.input} placeholder="12/30" value={cardExpiry} onChangeText={setCardExpiry} />
-                  </View>
-                  <View style={styles.half}>
-                    <Text style={styles.label}>CVV</Text>
-                    <TextInput style={styles.input} placeholder="123" secureTextEntry keyboardType="number-pad" value={cardCvv} onChangeText={setCardCvv} />
-                  </View>
-                </View>
-              </>
-            )}
+            {/* ✅ Paystack handles MTN, Vodafone, AirtelTigo & cards */}
+            <View style={styles.secureBox}>
+              <Ionicons name="lock-closed" size={16} color="#2563EB" />
+              <Text style={styles.secureText}>
+                Secured by Paystack — pay with Mobile Money (MTN, Vodafone, AirtelTigo) or card.
+              </Text>
+            </View>
 
-            <TouchableOpacity style={[styles.payBtn, processing && styles.disabled]} disabled={processing} onPress={handlePayment}>
-              {processing ? <ActivityIndicator color="#FFF" /> : <Text style={styles.payBtnText}>Pay {formatMoney(selectedBooking.totalAmount)}</Text>}
+            <TouchableOpacity style={[styles.payBtn, processing && styles.disabled]} disabled={processing} onPress={startPayment}>
+              {processing ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <Text style={styles.payBtnText}>Pay {formatMoney(selectedBooking.totalAmount)} with Paystack</Text>
+              )}
             </TouchableOpacity>
           </View>
         </>
@@ -243,6 +262,42 @@ export default function PaymentsScreen({ route }: any) {
           </View>
         ))
       )}
+
+      {/* ─── ✅ Paystack checkout WebView ─────────────────────── */}
+      <Modal visible={payUrl !== null} animationType="slide" onRequestClose={closeCheckout}>
+        <View style={styles.webviewContainer}>
+          <View style={styles.webviewHeader}>
+            <Text style={styles.webviewTitle}>Paystack Checkout</Text>
+            <TouchableOpacity onPress={closeCheckout} hitSlop={8}>
+              <Ionicons name="close" size={24} color="#111827" />
+            </TouchableOpacity>
+          </View>
+
+          {payUrl && (
+            <WebView
+              source={{ uri: payUrl }}
+              style={{ flex: 1 }}
+              startInLoadingState
+              renderLoading={() => (
+                <View style={styles.webviewLoading}>
+                  <ActivityIndicator size="large" color="#2563EB" />
+                </View>
+              )}
+              onNavigationStateChange={handleWebViewNav}
+            />
+          )}
+        </View>
+      </Modal>
+
+      {/* Verifying overlay */}
+      <Modal visible={verifying} transparent animationType="fade">
+        <View style={styles.verifyingOverlay}>
+          <View style={styles.verifyingBox}>
+            <ActivityIndicator size="large" color="#2563EB" />
+            <Text style={styles.verifyingText}>Verifying payment...</Text>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -252,9 +307,12 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 30 },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#F9FAFB" },
   loadingText: { color: "#6B7280", marginTop: 10, fontSize: 14 },
-  header: { paddingTop: 60, paddingBottom: 20, paddingHorizontal: 24, backgroundColor: "#1E3A5F" },
-  headerTitle: { color: "#FFFFFF", fontSize: 24, fontWeight: "bold" },
-  headerSubtitle: { color: "#94A3B8", fontSize: 14, marginTop: 4 },
+
+  // ✅ CHANGED: white header to match the rest of the app
+  header: { paddingTop: 60, paddingBottom: 20, paddingHorizontal: 24, backgroundColor: "#FFFFFF" },
+  headerTitle: { color: "#111827", fontSize: 24, fontWeight: "bold" },
+  headerSubtitle: { color: "#6B7280", fontSize: 14, marginTop: 4 },
+
   sectionTitle: { fontSize: 18, fontWeight: "bold", color: "#111827", paddingHorizontal: 24, marginTop: 24, marginBottom: 12 },
   emptyCard: { backgroundColor: "#FFFFFF", borderRadius: 12, padding: 20, marginHorizontal: 24, alignItems: "center" },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 5 },
@@ -262,32 +320,31 @@ const styles = StyleSheet.create({
   bookingCard: { backgroundColor: "#FFFFFF", borderRadius: 12, marginHorizontal: 24, marginBottom: 12, padding: 16, borderWidth: 1, borderColor: "transparent" },
   selectedBookingCard: { borderColor: "#2563EB", backgroundColor: "#EFF6FF" },
   bookingRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
-  bookingTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
+  bookingTitle: { fontSize: 16, fontWeight: "700", color: "#111827", flex: 1, marginRight: 8 },
   selectedText: { color: "#2563EB", fontSize: 11, fontWeight: "bold" },
   info: { color: "#6B7280", fontSize: 13, marginBottom: 6 },
   amount: { color: "#16A34A", fontSize: 16, fontWeight: "700" },
-  methodRow: { flexDirection: "row", gap: 10, paddingHorizontal: 24 },
-  methodButton: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: "center", backgroundColor: "#E5E7EB" },
-  selectedMethod: { backgroundColor: "#2563EB" },
-  methodText: { color: "#4B5563", fontWeight: "700", fontSize: 13 },
-  selectedMethodText: { color: "#FFFFFF" },
-  paymentCard: { backgroundColor: "#FFFFFF", marginHorizontal: 24, marginTop: 14, borderRadius: 12, padding: 16 },
+
+  paymentCard: { backgroundColor: "#FFFFFF", marginHorizontal: 24, marginTop: 4, borderRadius: 12, padding: 16 },
   payFor: { fontSize: 13, color: "#6B7280" },
   bold: { fontWeight: "700", color: "#111827" },
   bigAmount: { fontSize: 26, fontWeight: "800", color: "#2563EB", marginTop: 6, marginBottom: 16 },
-  label: { fontWeight: "600", color: "#374151", fontSize: 13, marginBottom: 6 },
-  input: { backgroundColor: "#FFF", borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 12, color: "#111827", fontSize: 15, marginBottom: 14 },
-  providerRow: { flexDirection: "row", gap: 7, marginBottom: 16 },
-  providerButton: { flex: 1, backgroundColor: "#F3F4F6", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
-  selectedProvider: { backgroundColor: "#DBEAFE", borderWidth: 1, borderColor: "#2563EB" },
-  providerText: { color: "#6B7280", fontSize: 12, fontWeight: "700" },
-  selectedProviderText: { color: "#2563EB" },
-  demoWarning: { color: "#B45309", backgroundColor: "#FEF3C7", padding: 10, borderRadius: 8, fontSize: 12, marginBottom: 16 },
-  row: { flexDirection: "row", gap: 10 },
-  half: { flex: 1 },
+
+  secureBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#EFF6FF",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 14,
+  },
+  secureText: { flex: 1, fontSize: 12, color: "#374151", lineHeight: 17 },
+
   payBtn: { backgroundColor: "#2563EB", borderRadius: 9, paddingVertical: 14, alignItems: "center", marginTop: 6 },
   disabled: { opacity: 0.6 },
   payBtnText: { color: "#FFFFFF", fontWeight: "800", fontSize: 15 },
+
   historyCard: { backgroundColor: "#FFFFFF", borderRadius: 12, marginHorizontal: 24, marginBottom: 12, padding: 16 },
   rowSpace: { flexDirection: "row", justifyContent: "space-between", marginBottom: 8 },
   historyTitle: { fontSize: 15, fontWeight: "700", color: "#111827" },
@@ -297,4 +354,23 @@ const styles = StyleSheet.create({
   orange: { color: "#D97706" },
   historyAmount: { fontSize: 18, fontWeight: "800", color: "#2563EB", marginBottom: 8 },
   infoSmall: { color: "#6B7280", fontSize: 12, marginBottom: 3 },
+
+  // ✅ WebView checkout
+  webviewContainer: { flex: 1, backgroundColor: "#FFFFFF" },
+  webviewHeader: {
+    paddingTop: 56,
+    paddingBottom: 14,
+    paddingHorizontal: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+  webviewTitle: { fontSize: 17, fontWeight: "700", color: "#111827" },
+  webviewLoading: { flex: 1, justifyContent: "center", alignItems: "center" },
+
+  verifyingOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", alignItems: "center" },
+  verifyingBox: { backgroundColor: "#FFFFFF", borderRadius: 14, padding: 28, alignItems: "center" },
+  verifyingText: { marginTop: 12, fontSize: 14, color: "#374151", fontWeight: "600" },
 });

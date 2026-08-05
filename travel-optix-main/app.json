@@ -21,10 +21,17 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.ahmedbarryexpouser.traveloptix"
     },
     "web": {
       "favicon": "./assets/newicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "4a3e381c-d3d8-4753-9dc4-878bb4b55ca7"
+      }
+    },
+    "owner": "ahmedbarryexpouser"
   }
 }

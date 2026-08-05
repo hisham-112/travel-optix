@@ -4,21 +4,22 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   ActivityIndicator,
   Alert,
+  Modal,
 } from "react-native";
 import { useCallback, useEffect, useState } from "react";
 import { useAuthStore } from "../../store/authStore";
+import { WebView } from "react-native-webview";
 import api from "../../services/api";
+
+const PAYSTACK_CALLBACK_PREFIX = "https://traveloptix.app/paystack/callback";
 
 type PassInfo = {
   passExpiryDate?: string;
   isExpired?: boolean;
   renewalFee?: number;
 };
-
-type PaymentMethod = "MOBILE_MONEY" | "CARD";
 
 function formatDate(dateValue?: string) {
   if (!dateValue) return "Not set";
@@ -43,22 +44,15 @@ export default function TravelPassScreen() {
 
   const [passInfo, setPassInfo] = useState<PassInfo>({});
   const [loading, setLoading] = useState(true);
-  const [showRenewModal, setShowRenewModal] = useState(false);
   const [processing, setProcessing] = useState(false);
-
-  const [paymentMethod, setPaymentMethod] =
-    useState<PaymentMethod>("MOBILE_MONEY");
-  const [mobileNumber, setMobileNumber] = useState("");
-  const [mobileProvider, setMobileProvider] = useState("MTN");
-  const [cardHolderName, setCardHolderName] = useState("");
-  const [cardNumber, setCardNumber] = useState("");
-  const [cardExpiry, setCardExpiry] = useState("");
-  const [cardCvv, setCardCvv] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [payUrl, setPayUrl] = useState<string | null>(null);
+  const [payReference, setPayReference] = useState<string | null>(null);
 
   const fetchPassInfo = useCallback(async () => {
     try {
       const response = await api.get("/tourist/pass");
-      setPassInfo(response.data.data || {});
+      setPassInfo(response.data?.data || {});
     } catch (error: any) {
       console.log("Pass info error:", error.response?.data || error.message);
     } finally {
@@ -70,441 +64,422 @@ export default function TravelPassScreen() {
     fetchPassInfo();
   }, [fetchPassInfo]);
 
-  const openRenewModal = () => {
-    setPaymentMethod("MOBILE_MONEY");
-    setMobileNumber("");
-    setMobileProvider("MTN");
-    setCardHolderName("");
-    setCardNumber("");
-    setCardExpiry("");
-    setCardCvv("");
-    setShowRenewModal(true);
-  };
+  const fee = passInfo.renewalFee || 25;
 
-  const closeRenewModal = () => {
-    setShowRenewModal(false);
-    setProcessing(false);
-  };
-
-  const handleRenew = () => {
-    if (paymentMethod === "MOBILE_MONEY" && !mobileNumber.trim()) {
-      Alert.alert("Mobile number required", "Enter a mobile money number.");
-      return;
-    }
-
-    if (paymentMethod === "CARD" && (!cardHolderName.trim() || !cardNumber.trim())) {
-      Alert.alert("Card details required", "Enter card holder name and number.");
-      return;
-    }
-
-    const fee = passInfo.renewalFee || 25;
-
+  const handleRenew = async () => {
     Alert.alert(
-      "Confirm Renewal",
-      `Renew your Travel Pass for GHS ${fee.toFixed(2)}?`,
+      "Renew Travel Pass",
+      `Renew your Travel Pass for GHS ${fee.toFixed(2)}?\n\nYou will be redirected to Paystack to complete payment securely.`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Pay & Renew", onPress: processRenewal },
+        { text: "Continue to Payment", onPress: startRenewalPayment },
       ]
     );
   };
 
-  const processRenewal = async () => {
+  const startRenewalPayment = async () => {
     setProcessing(true);
 
     try {
-      const body =
-        paymentMethod === "MOBILE_MONEY"
-          ? {
-              paymentMethod: "MOBILE_MONEY",
-              mobileNumber: mobileNumber.trim(),
-              mobileProvider,
-            }
-          : {
-              paymentMethod: "CARD",
-              cardHolderName: cardHolderName.trim(),
-              cardNumber: cardNumber.replace(/\s/g, ""),
-              cardExpiry: cardExpiry.trim(),
-              cardCvv: cardCvv.trim(),
-            };
-
-      const response = await api.post("/tourist/pass/renew", body);
-
-      Alert.alert(
-        "Pass Renewed! 🎉",
-        `${response.data.message}\n\nNew expiry: ${formatDate(
-          response.data.data?.newExpiryDate
-        )}\nTransaction: ${response.data.data?.transactionRef}`
+      const response = await api.post(
+        "/tourist/payments/paystack/initialize-travel-pass"
       );
 
-      closeRenewModal();
-      await fetchPassInfo();
+      const data = response.data?.data || {};
+
+      if (!data.authorizationUrl) {
+        throw new Error("No Paystack checkout URL returned.");
+      }
+
+      setPayReference(data.reference);
+      setPayUrl(data.authorizationUrl);
     } catch (error: any) {
       Alert.alert(
-        "Renewal Failed",
-        error.response?.data?.message || "Could not renew pass. Please try again."
+        "Could not start payment",
+        error.response?.data?.message ||
+          error.message ||
+          "Please try again."
       );
     } finally {
       setProcessing(false);
     }
   };
 
-  const fee = passInfo.renewalFee || 25;
+  const verifyRenewal = async (reference?: string | null) => {
+    const ref = reference || payReference;
+    if (!ref) return;
+
+    setVerifying(true);
+
+    try {
+      const response = await api.get(
+        `/tourist/payments/paystack/verify-travel-pass/${ref}`
+      );
+
+      const status = (
+        response.data?.data?.paymentStatus || ""
+      ).toUpperCase();
+
+      if (status === "SUCCESS") {
+        Alert.alert(
+          "Pass Renewed! 🎉",
+          `Your Travel Pass has been renewed successfully.\n\nNew expiry: ${formatDate(
+            response.data?.data?.newExpiryDate
+          )}`
+        );
+        await fetchPassInfo();
+      } else {
+        Alert.alert(
+          "Payment not completed",
+          "No successful payment was found for this transaction."
+        );
+      }
+    } catch (error: any) {
+      Alert.alert(
+        "Verification failed",
+        error.response?.data?.message ||
+          error.message ||
+          "Could not verify payment."
+      );
+    } finally {
+      setVerifying(false);
+      setPayReference(null);
+    }
+  };
+
+  const handleWebViewNav = (navState: { url?: string }) => {
+    if (
+      navState.url &&
+      navState.url.startsWith(PAYSTACK_CALLBACK_PREFIX)
+    ) {
+      setPayUrl(null);
+      verifyRenewal();
+    }
+  };
+
+  const closeCheckout = () => {
+    setPayUrl(null);
+    if (payReference) {
+      verifyRenewal(payReference);
+    }
+  };
 
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Travel Pass</Text>
-        <Text style={styles.headerSubtitle}>Digital Identification & Access Card</Text>
-      </View>
-
-      <View style={styles.passCard}>
-        <View style={styles.passTop}>
-          <Text style={styles.passAppName}>Travel Optix</Text>
-          <Text style={styles.passType}>PREMIUM PASS</Text>
+    <>
+      <ScrollView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>My Travel Pass</Text>
+          <Text style={styles.headerSubtitle}>
+            Digital Identification & Access Card
+          </Text>
         </View>
 
-        <View style={styles.passDivider} />
-
-        <View style={styles.passInfo}>
-          <View style={styles.passRow}>
-            <Text style={styles.passInfoLabel}>Pass ID</Text>
-            <Text style={styles.passInfoValue}>{passId}</Text>
+        <View style={styles.passCard}>
+          <View style={styles.passTop}>
+            <Text style={styles.passAppName}>Travel Optix</Text>
+            <Text style={styles.passType}>PREMIUM PASS</Text>
           </View>
 
-          <View style={styles.passRow}>
-            <Text style={styles.passInfoLabel}>Holder</Text>
-            <Text style={styles.passInfoValue}>{fullName}</Text>
-          </View>
+          <View style={styles.passDivider} />
 
-          <View style={styles.passRow}>
-            <Text style={styles.passInfoLabel}>Email</Text>
-            <Text style={styles.passInfoValue} numberOfLines={1}>
-              {email}
-            </Text>
-          </View>
+          <View style={styles.passInfo}>
+            <View style={styles.passRow}>
+              <Text style={styles.passInfoLabel}>Pass ID</Text>
+              <Text style={styles.passInfoValue}>{passId}</Text>
+            </View>
 
-          <View style={styles.passRow}>
-            <Text style={styles.passInfoLabel}>Role</Text>
-            <Text style={styles.passInfoValue}>
-              {role.replace(/_/g, " ")}
-            </Text>
-          </View>
+            <View style={styles.passRow}>
+              <Text style={styles.passInfoLabel}>Holder</Text>
+              <Text style={styles.passInfoValue}>{fullName}</Text>
+            </View>
 
-          <View style={styles.passRow}>
-            <Text style={styles.passInfoLabel}>Status</Text>
-            {loading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={passInfo.isExpired ? styles.statusExpired : styles.statusActive}>
-                {passInfo.isExpired ? "EXPIRED" : "ACTIVE"}
+            <View style={styles.passRow}>
+              <Text style={styles.passInfoLabel}>Email</Text>
+              <Text style={styles.passInfoValue} numberOfLines={1}>
+                {email}
               </Text>
-            )}
-          </View>
-
-          <View style={styles.passRow}>
-            <Text style={styles.passInfoLabel}>Expires</Text>
-            <Text style={styles.expiryDate}>
-              {loading ? "Loading..." : formatDate(passInfo.passExpiryDate)}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      <Text style={styles.sectionTitle}>What Your Pass Includes</Text>
-
-      <View style={styles.benefitCard}>
-        <Text style={styles.benefitTitle}>Attractions Access</Text>
-        <Text style={styles.benefitDesc}>Book and enjoy registered tourist attractions across Ghana.</Text>
-      </View>
-
-      <View style={styles.benefitCard}>
-        <Text style={styles.benefitTitle}>Event Bookings</Text>
-        <Text style={styles.benefitDesc}>Access to local events and cultural festivals.</Text>
-      </View>
-
-      <View style={styles.benefitCard}>
-        <Text style={styles.benefitTitle}>Booking Management</Text>
-        <Text style={styles.benefitDesc}>Track all your bookings in one place.</Text>
-      </View>
-
-      <TouchableOpacity style={styles.renewButton} onPress={openRenewModal}>
-        <Text style={styles.renewButtonText}>
-          Renew Travel Pass — GHS {fee.toFixed(2)}
-        </Text>
-      </TouchableOpacity>
-
-      <Text style={styles.note}>
-        Renewal extends your pass by 1 year from today (or from your current expiry date if still active).
-      </Text>
-
-      <View style={styles.bottomSpace} />
-
-      {/* ─── Renewal Modal ─────────────────────────────────── */}
-      {showRenewModal && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Renew Travel Pass</Text>
-
-            <View style={styles.feeBox}>
-              <Text style={styles.feeLabel}>Renewal Fee</Text>
-              <Text style={styles.feeAmount}>GHS {fee.toFixed(2)}</Text>
-              <Text style={styles.feeNote}>Valid for 1 year</Text>
             </View>
 
-            <Text style={styles.label}>Payment Method</Text>
-            <View style={styles.methodRow}>
-              <TouchableOpacity
-                style={[
-                  styles.methodButton,
-                  paymentMethod === "MOBILE_MONEY" && styles.selectedMethod,
-                ]}
-                onPress={() => setPaymentMethod("MOBILE_MONEY")}
-              >
-                <Text
-                  style={[
-                    styles.methodText,
-                    paymentMethod === "MOBILE_MONEY" && styles.selectedMethodText,
-                  ]}
-                >
-                  Mobile Money
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.methodButton,
-                  paymentMethod === "CARD" && styles.selectedMethod,
-                ]}
-                onPress={() => setPaymentMethod("CARD")}
-              >
-                <Text
-                  style={[
-                    styles.methodText,
-                    paymentMethod === "CARD" && styles.selectedMethodText,
-                  ]}
-                >
-                  Card
-                </Text>
-              </TouchableOpacity>
+            <View style={styles.passRow}>
+              <Text style={styles.passInfoLabel}>Role</Text>
+              <Text style={styles.passInfoValue}>
+                {role.replace(/_/g, " ")}
+              </Text>
             </View>
 
-            {paymentMethod === "MOBILE_MONEY" ? (
-              <>
-                <Text style={styles.label}>Provider</Text>
-                <View style={styles.providerRow}>
-                  {["MTN", "Vodafone", "AirtelTigo"].map((provider) => (
-                    <TouchableOpacity
-                      key={provider}
-                      style={[
-                        styles.providerButton,
-                        mobileProvider === provider && styles.selectedProviderButton,
-                      ]}
-                      onPress={() => setMobileProvider(provider)}
-                    >
-                      <Text
-                        style={[
-                          styles.providerText,
-                          mobileProvider === provider && styles.selectedProviderText,
-                        ]}
-                      >
-                        {provider}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <Text style={styles.label}>Mobile Number</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g. 0240000000"
-                  placeholderTextColor="#9CA3AF"
-                  keyboardType="phone-pad"
-                  value={mobileNumber}
-                  onChangeText={setMobileNumber}
-                />
-              </>
-            ) : (
-              <>
-                <Text style={styles.demoWarning}>
-                  Demo only — do not enter a real card number.
-                </Text>
-
-                <Text style={styles.label}>Card Holder Name</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Demo User"
-                  placeholderTextColor="#9CA3AF"
-                  value={cardHolderName}
-                  onChangeText={setCardHolderName}
-                />
-
-                <Text style={styles.label}>Card Number</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="4111 1111 1111 1111"
-                  placeholderTextColor="#9CA3AF"
-                  keyboardType="number-pad"
-                  value={cardNumber}
-                  onChangeText={setCardNumber}
-                />
-
-                <View style={styles.cardDetailsRow}>
-                  <View style={styles.halfInput}>
-                    <Text style={styles.label}>Expiry</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="12/30"
-                      placeholderTextColor="#9CA3AF"
-                      value={cardExpiry}
-                      onChangeText={setCardExpiry}
-                    />
-                  </View>
-                  <View style={styles.halfInput}>
-                    <Text style={styles.label}>CVV</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="123"
-                      placeholderTextColor="#9CA3AF"
-                      keyboardType="number-pad"
-                      secureTextEntry
-                      value={cardCvv}
-                      onChangeText={setCardCvv}
-                    />
-                  </View>
-                </View>
-              </>
-            )}
-
-            <TouchableOpacity
-              style={[styles.payButton, processing && styles.payButtonDisabled]}
-              disabled={processing}
-              onPress={handleRenew}
-            >
-              {processing ? (
-                <ActivityIndicator color="#FFFFFF" />
+            <View style={styles.passRow}>
+              <Text style={styles.passInfoLabel}>Status</Text>
+              {loading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
-                <Text style={styles.payButtonText}>
-                  Pay GHS {fee.toFixed(2)}
+                <Text
+                  style={
+                    passInfo.isExpired
+                      ? styles.statusExpired
+                      : styles.statusActive
+                  }
+                >
+                  {passInfo.isExpired ? "EXPIRED" : "ACTIVE"}
                 </Text>
               )}
-            </TouchableOpacity>
+            </View>
 
-            <TouchableOpacity style={styles.cancelButton} onPress={closeRenewModal}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
+            <View style={styles.passRow}>
+              <Text style={styles.passInfoLabel}>Expires</Text>
+              <Text style={styles.expiryDate}>
+                {loading ? "Loading..." : formatDate(passInfo.passExpiryDate)}
+              </Text>
+            </View>
           </View>
         </View>
-      )}
-    </ScrollView>
+
+        <Text style={styles.sectionTitle}>What Your Pass Includes</Text>
+
+        <View style={styles.benefitCard}>
+          <Text style={styles.benefitTitle}>Attractions Access</Text>
+          <Text style={styles.benefitDesc}>
+            Book and enjoy registered tourist attractions across Ghana.
+          </Text>
+        </View>
+
+        <View style={styles.benefitCard}>
+          <Text style={styles.benefitTitle}>Event Bookings</Text>
+          <Text style={styles.benefitDesc}>
+            Access to local events and cultural festivals.
+          </Text>
+        </View>
+
+        <View style={styles.benefitCard}>
+          <Text style={styles.benefitTitle}>Booking Management</Text>
+          <Text style={styles.benefitDesc}>
+            Track all your bookings in one place.
+          </Text>
+        </View>
+
+        <View style={styles.renewBox}>
+          <View style={styles.renewFeeRow}>
+            <Text style={styles.renewFeeLabel}>Renewal Fee</Text>
+            <Text style={styles.renewFeeAmount}>GHS {fee.toFixed(2)}</Text>
+          </View>
+          <Text style={styles.renewFeeNote}>
+            Extends your pass by 1 year · Secured by Paystack
+          </Text>
+
+          <TouchableOpacity
+            style={[
+              styles.renewButton,
+              processing && styles.renewButtonDisabled,
+            ]}
+            onPress={handleRenew}
+            disabled={processing}
+          >
+            {processing ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.renewButtonText}>
+                Renew Travel Pass with Paystack →
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.bottomSpace} />
+      </ScrollView>
+
+      <Modal
+        visible={payUrl !== null}
+        animationType="slide"
+        onRequestClose={closeCheckout}
+      >
+        <View style={styles.webviewContainer}>
+          <View style={styles.webviewHeader}>
+            <Text style={styles.webviewTitle}>Paystack Checkout</Text>
+            <TouchableOpacity onPress={closeCheckout} hitSlop={8}>
+              <Text style={styles.webviewClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {payUrl && (
+            <WebView
+              source={{ uri: payUrl }}
+              style={styles.webview}
+              startInLoadingState
+              renderLoading={() => (
+                <View style={styles.webviewLoading}>
+                  <ActivityIndicator size="large" color="#2563EB" />
+                </View>
+              )}
+              onNavigationStateChange={handleWebViewNav}
+            />
+          )}
+        </View>
+      </Modal>
+
+      <Modal visible={verifying} transparent animationType="fade">
+        <View style={styles.verifyingOverlay}>
+          <View style={styles.verifyingBox}>
+            <ActivityIndicator size="large" color="#2563EB" />
+            <Text style={styles.verifyingText}>Verifying payment...</Text>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F9FAFB" },
-  header: { paddingTop: 60, paddingBottom: 20, paddingHorizontal: 24, backgroundColor: "#FFFFFF" },
+  header: {
+    paddingTop: 60,
+    paddingBottom: 20,
+    paddingHorizontal: 24,
+    backgroundColor: "#FFFFFF",
+  },
   headerTitle: { fontSize: 24, fontWeight: "bold", color: "#111827" },
   headerSubtitle: { marginTop: 4, fontSize: 14, color: "#6B7280" },
-
-  passCard: { margin: 24, backgroundColor: "#1E3A5F", borderRadius: 16, padding: 24 },
-  passTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  passCard: {
+    margin: 24,
+    backgroundColor: "#2563EB",
+    borderRadius: 16,
+    padding: 24,
+  },
+  passTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
   passAppName: { color: "#FFFFFF", fontSize: 20, fontWeight: "bold" },
-  passType: { color: "#94A3B8", fontSize: 12, backgroundColor: "#2D4E6F", paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20 },
-  passDivider: { height: 1, backgroundColor: "#2D4E6F", marginVertical: 16 },
+  passType: {
+    color: "#DBEAFE",
+    fontSize: 12,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  passDivider: {
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.3)",
+    marginVertical: 16,
+  },
   passInfo: { gap: 14 },
-  passRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  passInfoLabel: { color: "#94A3B8", fontSize: 14 },
+  passRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  passInfoLabel: { color: "#DBEAFE", fontSize: 14 },
   passInfoValue: { color: "#FFFFFF", fontSize: 15, fontWeight: "600" },
   statusActive: { color: "#4ADE80", fontWeight: "700", fontSize: 15 },
   statusExpired: { color: "#F87171", fontWeight: "700", fontSize: 15 },
   expiryDate: { color: "#FBBF24", fontWeight: "700", fontSize: 15 },
-
-  sectionTitle: { fontSize: 18, fontWeight: "bold", color: "#111827", paddingHorizontal: 24, marginBottom: 12 },
-
-  benefitCard: { backgroundColor: "#FFFFFF", borderRadius: 12, marginHorizontal: 24, marginBottom: 12, padding: 16, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
-  benefitTitle: { fontSize: 15, fontWeight: "600", color: "#111827", marginBottom: 6 },
-  benefitDesc: { fontSize: 13, color: "#6B7280", lineHeight: 18 },
-
-  renewButton: { backgroundColor: "#2563EB", marginHorizontal: 24, marginTop: 10, borderRadius: 12, paddingVertical: 16, alignItems: "center" },
-  renewButtonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "bold" },
-
-  note: { textAlign: "center", fontSize: 12, color: "#9CA3AF", marginTop: 10, paddingHorizontal: 40, marginBottom: 30 },
-
-  bottomSpace: { height: 40 },
-
-  // ─── Modal ─────────────────────────────────
-  modalOverlay: {
-    position: "absolute",
-    top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.75)",
-    justifyContent: "center",
-    padding: 20,
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#111827",
+    paddingHorizontal: 24,
+    marginBottom: 12,
   },
-  modalContent: {
+  benefitCard: {
     backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    marginHorizontal: 24,
+    marginBottom: 12,
+    padding: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  benefitTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#111827",
+    marginBottom: 6,
+  },
+  benefitDesc: { fontSize: 13, color: "#6B7280", lineHeight: 18 },
+  renewBox: {
+    margin: 24,
+    backgroundColor: "#EFF6FF",
     borderRadius: 16,
     padding: 20,
-    maxHeight: "85%",
-  },
-  modalTitle: { fontSize: 18, fontWeight: "bold", textAlign: "center", marginBottom: 16, color: "#111827" },
-
-  feeBox: {
-    backgroundColor: "#EFF6FF",
-    borderRadius: 12,
-    padding: 16,
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  feeLabel: { color: "#2563EB", fontSize: 13 },
-  feeAmount: { fontSize: 28, fontWeight: "bold", color: "#1E3A5F", marginVertical: 4 },
-  feeNote: { color: "#6B7280", fontSize: 12 },
-
-  label: { fontSize: 14, fontWeight: "600", color: "#374151", marginTop: 10, marginBottom: 6 },
-
-  methodRow: { flexDirection: "row", gap: 10 },
-  methodButton: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: "center", backgroundColor: "#E5E7EB" },
-  selectedMethod: { backgroundColor: "#2563EB" },
-  methodText: { color: "#4B5563", fontSize: 13, fontWeight: "700" },
-  selectedMethodText: { color: "#FFFFFF" },
-
-  providerRow: { flexDirection: "row", gap: 7, marginBottom: 4 },
-  providerButton: { flex: 1, backgroundColor: "#F3F4F6", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
-  selectedProviderButton: { backgroundColor: "#DBEAFE", borderWidth: 1, borderColor: "#2563EB" },
-  providerText: { color: "#6B7280", fontSize: 12, fontWeight: "700" },
-  selectedProviderText: { color: "#2563EB" },
-
-  input: {
-    backgroundColor: "#F8FAFC",
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 15,
+    borderColor: "#DBEAFE",
+  },
+  renewFeeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 4,
   },
-
-  demoWarning: {
-    color: "#B45309",
-    backgroundColor: "#FEF3C7",
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 12,
-    marginBottom: 10,
+  renewFeeLabel: {
+    fontSize: 14,
+    color: "#1E40AF",
+    fontWeight: "600",
   },
-
-  cardDetailsRow: { flexDirection: "row", gap: 10 },
-  halfInput: { flex: 1 },
-
-  payButton: {
+  renewFeeAmount: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#2563EB",
+  },
+  renewFeeNote: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginBottom: 16,
+  },
+  renewButton: {
     backgroundColor: "#2563EB",
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: "center",
-    marginTop: 16,
   },
-  payButtonDisabled: { opacity: 0.7 },
-  payButtonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "bold" },
-
-  cancelButton: { marginTop: 10, paddingVertical: 10, alignItems: "center" },
-  cancelButtonText: { color: "#DC2626", fontSize: 14, fontWeight: "600" },
+  renewButtonDisabled: { opacity: 0.7 },
+  renewButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  bottomSpace: { height: 40 },
+  webviewContainer: { flex: 1, backgroundColor: "#FFFFFF" },
+  webviewHeader: {
+    paddingTop: 56,
+    paddingBottom: 14,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  webviewTitle: {
+    color: "#111827",
+    fontSize: 17,
+    fontWeight: "900",
+  },
+  webviewClose: { fontSize: 20, color: "#111827" },
+  webview: { flex: 1 },
+  webviewLoading: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  verifyingOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  verifyingBox: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 26,
+    alignItems: "center",
+    minWidth: 190,
+  },
+  verifyingText: {
+    marginTop: 12,
+    color: "#374151",
+    fontSize: 14,
+    fontWeight: "800",
+  },
 });

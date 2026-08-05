@@ -8,7 +8,8 @@ export type RootStackParamList = {
   Notifications: undefined;
   PrivacyPolicy: undefined;
   HelpSupport: undefined;
-  Transport: undefined; // ✅ Added
+  Transport: undefined;
+  EditProfile: undefined;
 };
 
 export type AuthStackParamList = {
@@ -25,5 +26,5 @@ export type MainTabParamList = {
   Attractions: undefined;
   Guides: undefined;
   Payments: undefined;
-  Transport: undefined; // ✅ Added
+  Transport: undefined;
 };

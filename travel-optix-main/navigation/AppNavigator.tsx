@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, View, StyleSheet } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -16,6 +16,7 @@ import {
 } from "@expo/vector-icons";
 
 // Auth Screens
+import SplashScreen from "../screens/auth/SplashScreen";
 import LoginScreen from "../screens/auth/LoginScreen";
 import RegisterScreen from "../screens/auth/RegisterScreen";
 
@@ -32,10 +33,13 @@ import PaymentsScreen from "../screens/traveler/PaymentsScreen";
 // ✅ Transport screen
 import TransportScreen from "../screens/traveler/TransportScreen";
 
-// ✅ New support screens
+// ✅ Support screens
 import NotificationsScreen from "../screens/traveler/NotificationsScreen";
 import PrivacyPolicyScreen from "../screens/traveler/PrivacyPolicyScreen";
 import HelpSupportScreen from "../screens/traveler/HelpSupportScreen";
+
+// ✅ Edit Profile screen
+import EditProfileScreen from "../screens/traveler/EditProfileScreen";
 
 // Guardian Screen
 import ApprovalDashboard from "../screens/guardian/ApprovalDashboard";
@@ -159,10 +163,19 @@ export default function AppNavigator() {
   const user = useAuthStore((state) => state.user);
   const restoreSession = useAuthStore((state) => state.restoreSession);
 
+  const [showSplash, setShowSplash] = useState(true);
+
   useEffect(() => { restoreSession(); }, [restoreSession]);
 
-  if (isLoading) {
-    return (
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSplash(false), 2000); // 2s custom splash
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (showSplash || isLoading) {
+    return showSplash ? (
+      <SplashScreen />
+    ) : (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#2563EB" />
       </View>
@@ -192,7 +205,10 @@ export default function AppNavigator() {
         <RootStack.Screen name="Notifications" component={NotificationsScreen} />
         <RootStack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
         <RootStack.Screen name="HelpSupport" component={HelpSupportScreen} />
-        
+
+        {/* ✅ Edit Profile registered */}
+        <RootStack.Screen name="EditProfile" component={EditProfileScreen} />
+
         {/* ✅ Transport registered in RootStack too */}
         <RootStack.Screen name="Transport" component={TransportScreen} />
       </RootStack.Navigator>
