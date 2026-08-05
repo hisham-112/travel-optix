@@ -9,7 +9,7 @@
     "newArchEnabled": false,
 	"plugins": [
   	"expo-image-picker"
-	]
+	],
     "splash": {
       "image": "./assets/newicon.png",
       "resizeMode": "contain",
