@@ -1,7 +1,7 @@
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const API_URL = "http://100.112.25.176:8080/api" // Replace with your actual API URL
+const API_URL = "https://travel-optix.onrender.com/api"
 
 const api = axios.create({
   baseURL: API_URL,
