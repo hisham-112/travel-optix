@@ -6,7 +6,10 @@
     "orientation": "portrait",
     "icon": "./assets/newicon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
+	"plugins": [
+  	"expo-image-picker"
+	]
     "splash": {
       "image": "./assets/newicon.png",
       "resizeMode": "contain",
